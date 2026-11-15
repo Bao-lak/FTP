@@ -1,0 +1,1 @@
+Tài khoản Student: Có quyền Đọc + Ghi, nhưng KHÔNG có quyền Xóa (can_delete=0).

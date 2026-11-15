@@ -1,0 +1,24 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Môi trường ảo (Virtualenv)
+venv/
+.venv/
+env/
+
+# Logs
+*.log
+
+# Tệp tạm kiểm thử
+*.tmp
+*.bin
+
+# CSDL SQLite phát sinh (có thể khởi tạo lại bằng python3 init_db.py)
+*.db-journal
+
+# IDE & Editor
+.vscode/
+.idea/
+.DS_Store

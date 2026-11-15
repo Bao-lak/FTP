@@ -1,0 +1,9 @@
+# Dự án FTP Server & FTP Client (Lab 2 Mạng Máy Tính)
+# Yêu cầu Python 3.9 trở lên
+#
+# Dự án được tối ưu hóa để chạy trực tiếp trên thư viện chuẩn của Python (Standard Library):
+# socket, threading, sqlite3, hashlib, ssl, queue, tkinter.
+#
+# Trên Ubuntu cần cài tkinter nếu chưa có:
+# sudo apt install -y python3-tk
+
