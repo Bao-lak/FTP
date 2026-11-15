@@ -29,8 +29,21 @@ class ClientUI:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("FTP Client - Giao diện FileZilla (Lab 2 Mạng Máy Tính)")
-        self.root.geometry("1100x750")
-        self.root.minsize(950, 650)
+
+        # 1. Tự động tính toán tỷ lệ theo độ phân giải màn hình (Hỗ trợ 2K/2.8K/4K HiDPI)
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+
+        # Tỷ lệ scale chuẩn dựa trên 1920x1080 (Màn 2880x1800 -> scale = 1.5)
+        self.scale = max(1.0, min(2.5, screen_w / 1920.0))
+
+        # Cài đặt kích thước cửa sổ tương thích độ phân giải màn hình
+        win_w = max(1050, int(screen_w * 0.65))
+        win_h = max(720, int(screen_h * 0.74))
+        pos_x = max(0, (screen_w - win_w) // 2)
+        pos_y = max(0, (screen_h - win_h) // 2)
+        self.root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
+        self.root.minsize(int(950 * self.scale * 0.75), int(620 * self.scale * 0.75))
 
         # Hàng đợi giao tiếp luồng với GUI
         self.gui_queue = queue.Queue()
@@ -53,16 +66,24 @@ class ClientUI:
         self.root.after(100, self._process_gui_queue)
 
     def _setup_styles(self) -> None:
-        """Cấu hình style giao diện ttk."""
+        """Cấu hình style giao diện ttk co giãn linh hoạt theo tỷ lệ màn hình."""
         self.style = ttk.Style()
         try:
             self.style.theme_use("clam")
         except Exception:
             pass
-        self.style.configure(".", font=("Segoe UI", 9))
-        self.style.configure("Header.TLabel", font=("Segoe UI", 10, "bold"))
-        self.style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
-        self.style.configure("Treeview", rowheight=24)
+
+        # Định cỡ font chữ và khoảng cách theo tỷ lệ màn hình (HiDPI)
+        self.font_base = ("Segoe UI", max(10, int(10 * self.scale)))
+        self.font_bold = ("Segoe UI", max(10, int(10 * self.scale)), "bold")
+        self.font_header = ("Segoe UI", max(11, int(11.5 * self.scale)), "bold")
+        self.font_log = ("Consolas", max(9, int(10 * self.scale)))
+        self.row_height = max(26, int(28 * self.scale))
+
+        self.style.configure(".", font=self.font_base)
+        self.style.configure("Header.TLabel", font=self.font_header)
+        self.style.configure("Treeview.Heading", font=self.font_bold)
+        self.style.configure("Treeview", rowheight=self.row_height)
 
     def _build_ui(self) -> None:
         """Xây dựng toàn bộ bố cục giao diện."""
@@ -128,8 +149,9 @@ class ClientUI:
             text="Kết Nối",
             bg="#2980b9",
             fg="white",
-            font=("Segoe UI", 9, "bold"),
-            padx=10,
+            font=self.font_bold,
+            padx=12,
+            pady=3,
             command=self.action_connect,
         )
         self.btn_connect.pack(side=tk.LEFT, padx=6)
@@ -139,8 +161,10 @@ class ClientUI:
             text="Ngắt Kết Nối",
             bg="#7f8c8d",
             fg="white",
+            font=self.font_bold,
             state=tk.DISABLED,
-            padx=8,
+            padx=10,
+            pady=3,
             command=self.action_disconnect,
         )
         self.btn_disconnect.pack(side=tk.LEFT, padx=2)
@@ -153,7 +177,7 @@ class ClientUI:
         log_frame.pack(fill=tk.X, padx=8, pady=2)
 
         self.txt_log = scrolledtext.ScrolledText(
-            log_frame, height=5, font=("Consolas", 9), bg="#1e272e", fg="#d2dae2", wrap=tk.WORD
+            log_frame, height=5, font=self.font_log, bg="#1e272e", fg="#d2dae2", wrap=tk.WORD
         )
         self.txt_log.pack(fill=tk.BOTH, expand=True)
 
@@ -207,10 +231,10 @@ class ClientUI:
         self.tree_local.heading("mtime", text="Ngày sửa")
         self.tree_local.heading("type", text="Loại")
 
-        self.tree_local.column("name", width=180, anchor=tk.W)
-        self.tree_local.column("size", width=80, anchor=tk.E)
-        self.tree_local.column("mtime", width=130, anchor=tk.CENTER)
-        self.tree_local.column("type", width=80, anchor=tk.CENTER)
+        self.tree_local.column("name", width=int(220 * self.scale), stretch=True, anchor=tk.W)
+        self.tree_local.column("size", width=int(95 * self.scale), stretch=False, anchor=tk.E)
+        self.tree_local.column("mtime", width=int(145 * self.scale), stretch=False, anchor=tk.CENTER)
+        self.tree_local.column("type", width=int(85 * self.scale), stretch=False, anchor=tk.CENTER)
 
         sb_local = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.tree_local.yview)
         self.tree_local.configure(yscrollcommand=sb_local.set)
@@ -257,10 +281,10 @@ class ClientUI:
         self.tree_remote.heading("mtime", text="Ngày sửa")
         self.tree_remote.heading("type", text="Loại")
 
-        self.tree_remote.column("name", width=180, anchor=tk.W)
-        self.tree_remote.column("size", width=80, anchor=tk.E)
-        self.tree_remote.column("mtime", width=130, anchor=tk.CENTER)
-        self.tree_remote.column("type", width=80, anchor=tk.CENTER)
+        self.tree_remote.column("name", width=int(220 * self.scale), stretch=True, anchor=tk.W)
+        self.tree_remote.column("size", width=int(95 * self.scale), stretch=False, anchor=tk.E)
+        self.tree_remote.column("mtime", width=int(145 * self.scale), stretch=False, anchor=tk.CENTER)
+        self.tree_remote.column("type", width=int(85 * self.scale), stretch=False, anchor=tk.CENTER)
 
         sb_remote = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.tree_remote.yview)
         self.tree_remote.configure(yscrollcommand=sb_remote.set)
@@ -313,12 +337,12 @@ class ClientUI:
         self.tree_queue.heading("speed", text="Tốc độ")
         self.tree_queue.heading("status", text="Trạng thái")
 
-        self.tree_queue.column("file", width=250, anchor=tk.W)
-        self.tree_queue.column("dir", width=90, anchor=tk.CENTER)
-        self.tree_queue.column("size", width=100, anchor=tk.E)
-        self.tree_queue.column("progress", width=100, anchor=tk.CENTER)
-        self.tree_queue.column("speed", width=120, anchor=tk.CENTER)
-        self.tree_queue.column("status", width=120, anchor=tk.CENTER)
+        self.tree_queue.column("file", width=int(280 * self.scale), stretch=True, anchor=tk.W)
+        self.tree_queue.column("dir", width=int(100 * self.scale), stretch=False, anchor=tk.CENTER)
+        self.tree_queue.column("size", width=int(110 * self.scale), stretch=False, anchor=tk.E)
+        self.tree_queue.column("progress", width=int(110 * self.scale), stretch=False, anchor=tk.CENTER)
+        self.tree_queue.column("speed", width=int(125 * self.scale), stretch=False, anchor=tk.CENTER)
+        self.tree_queue.column("status", width=int(125 * self.scale), stretch=False, anchor=tk.CENTER)
 
         self.tree_queue.pack(fill=tk.X, expand=True)
 

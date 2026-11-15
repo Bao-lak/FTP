@@ -25,8 +25,19 @@ class ServerUI:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("FTP Server Manager - RFC 959 (Lab 2 Mạng Máy Tính)")
-        self.root.geometry("1000x700")
-        self.root.minsize(850, 600)
+
+        # 1. Tự động tính toán tỷ lệ theo độ phân giải màn hình (Hỗ trợ 2K/2.8K/4K HiDPI)
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+
+        self.scale = max(1.0, min(2.5, screen_w / 1920.0))
+
+        win_w = max(1000, int(screen_w * 0.65))
+        win_h = max(700, int(screen_h * 0.74))
+        pos_x = max(0, (screen_w - win_w) // 2)
+        pos_y = max(0, (screen_h - win_h) // 2)
+        self.root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
+        self.root.minsize(int(850 * self.scale * 0.75), int(580 * self.scale * 0.75))
 
         # Hàng đợi nhận sự kiện từ luồng Server
         self.event_queue = queue.Queue()
@@ -47,19 +58,25 @@ class ServerUI:
         self.root.after(100, self._process_events)
 
     def _setup_styles(self) -> None:
-        """Cấu hình màu sắc và font chữ cho ttk widgets."""
+        """Cấu hình màu sắc và font chữ cho ttk widgets co giãn theo màn hình."""
         self.style = ttk.Style()
         try:
             self.style.theme_use("clam")
         except Exception:
             pass
 
-        # Màu sắc hiện đại
-        self.style.configure(".", font=("Segoe UI", 10))
-        self.style.configure("Header.TLabel", font=("Segoe UI", 13, "bold"))
-        self.style.configure("Status.TLabel", font=("Segoe UI", 10, "bold"))
-        self.style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
-        self.style.configure("Treeview", rowheight=26)
+        self.font_base = ("Segoe UI", max(10, int(10 * self.scale)))
+        self.font_bold = ("Segoe UI", max(10, int(10 * self.scale)), "bold")
+        self.font_header = ("Segoe UI", max(12, int(13 * self.scale)), "bold")
+        self.font_status = ("Segoe UI", max(10, int(10.5 * self.scale)), "bold")
+        self.font_log = ("Consolas", max(9, int(10 * self.scale)))
+        self.row_height = max(26, int(28 * self.scale))
+
+        self.style.configure(".", font=self.font_base)
+        self.style.configure("Header.TLabel", font=self.font_header)
+        self.style.configure("Status.TLabel", font=self.font_status)
+        self.style.configure("Treeview.Heading", font=self.font_bold)
+        self.style.configure("Treeview", rowheight=self.row_height)
 
     def _build_ui(self) -> None:
         """Xây dựng bố cục tổng thể của ứng dụng."""
@@ -188,9 +205,9 @@ class ServerUI:
             text="▶ KHỞI ĐỘNG SERVER",
             bg="#27ae60",
             fg="white",
-            font=("Segoe UI", 11, "bold"),
-            padx=20,
-            pady=8,
+            font=self.font_bold,
+            padx=int(18 * self.scale),
+            pady=int(6 * self.scale),
             command=self.start_server,
         )
         self.btn_start.pack(side=tk.LEFT, padx=10)
@@ -200,9 +217,9 @@ class ServerUI:
             text="⏹ DỪNG SERVER",
             bg="#c0392b",
             fg="white",
-            font=("Segoe UI", 11, "bold"),
-            padx=20,
-            pady=8,
+            font=self.font_bold,
+            padx=int(18 * self.scale),
+            pady=int(6 * self.scale),
             state=tk.DISABLED,
             command=self.stop_server,
         )
@@ -333,16 +350,16 @@ class ServerUI:
         self.tree_users.heading("max_conn", text="Max Kết nối")
         self.tree_users.heading("speed", text="Giới hạn (KB/s)")
 
-        self.tree_users.column("id", width=40, anchor=tk.CENTER)
-        self.tree_users.column("username", width=110, anchor=tk.W)
-        self.tree_users.column("home_dir", width=220, anchor=tk.W)
-        self.tree_users.column("read", width=65, anchor=tk.CENTER)
-        self.tree_users.column("write", width=65, anchor=tk.CENTER)
-        self.tree_users.column("delete", width=65, anchor=tk.CENTER)
-        self.tree_users.column("active", width=75, anchor=tk.CENTER)
-        self.tree_users.column("quota", width=85, anchor=tk.CENTER)
-        self.tree_users.column("max_conn", width=85, anchor=tk.CENTER)
-        self.tree_users.column("speed", width=100, anchor=tk.CENTER)
+        self.tree_users.column("id", width=int(50 * self.scale), anchor=tk.CENTER)
+        self.tree_users.column("username", width=int(120 * self.scale), anchor=tk.W)
+        self.tree_users.column("home_dir", width=int(240 * self.scale), anchor=tk.W)
+        self.tree_users.column("read", width=int(75 * self.scale), anchor=tk.CENTER)
+        self.tree_users.column("write", width=int(75 * self.scale), anchor=tk.CENTER)
+        self.tree_users.column("delete", width=int(75 * self.scale), anchor=tk.CENTER)
+        self.tree_users.column("active", width=int(85 * self.scale), anchor=tk.CENTER)
+        self.tree_users.column("quota", width=int(95 * self.scale), anchor=tk.CENTER)
+        self.tree_users.column("max_conn", width=int(95 * self.scale), anchor=tk.CENTER)
+        self.tree_users.column("speed", width=int(110 * self.scale), anchor=tk.CENTER)
 
         scrollbar = ttk.Scrollbar(self.tab_users, orient=tk.VERTICAL, command=self.tree_users.yview)
         self.tree_users.configure(yscrollcommand=scrollbar.set)
@@ -696,12 +713,12 @@ class ServerUI:
         self.tree_clients.heading("dir", text="Thư mục hiện tại")
         self.tree_clients.heading("status", text="Trạng thái")
 
-        self.tree_clients.column("id", width=70, anchor=tk.CENTER)
-        self.tree_clients.column("ip", width=140, anchor=tk.CENTER)
-        self.tree_clients.column("port", width=80, anchor=tk.CENTER)
-        self.tree_clients.column("user", width=140, anchor=tk.W)
-        self.tree_clients.column("dir", width=250, anchor=tk.W)
-        self.tree_clients.column("status", width=120, anchor=tk.CENTER)
+        self.tree_clients.column("id", width=int(80 * self.scale), anchor=tk.CENTER)
+        self.tree_clients.column("ip", width=int(150 * self.scale), anchor=tk.CENTER)
+        self.tree_clients.column("port", width=int(90 * self.scale), anchor=tk.CENTER)
+        self.tree_clients.column("user", width=int(150 * self.scale), anchor=tk.W)
+        self.tree_clients.column("dir", width=int(280 * self.scale), stretch=True, anchor=tk.W)
+        self.tree_clients.column("status", width=int(130 * self.scale), anchor=tk.CENTER)
 
         scrollbar = ttk.Scrollbar(
             self.tab_clients, orient=tk.VERTICAL, command=self.tree_clients.yview
@@ -779,7 +796,7 @@ class ServerUI:
         )
 
         self.txt_log = scrolledtext.ScrolledText(
-            top_group, height=10, font=("Consolas", 9), wrap=tk.WORD, bg="#2c3e50", fg="#ecf0f1"
+            top_group, height=8, font=self.font_log, wrap=tk.WORD, bg="#2c3e50", fg="#ecf0f1"
         )
         self.txt_log.pack(fill=tk.BOTH, expand=True)
 
@@ -817,15 +834,15 @@ class ServerUI:
         self.tree_transfers.heading("start", text="Thời gian bắt đầu")
         self.tree_transfers.heading("end", text="Thời gian xong")
 
-        self.tree_transfers.column("id", width=40, anchor=tk.CENTER)
-        self.tree_transfers.column("user", width=90, anchor=tk.W)
-        self.tree_transfers.column("file", width=160, anchor=tk.W)
-        self.tree_transfers.column("dir", width=75, anchor=tk.CENTER)
-        self.tree_transfers.column("size", width=80, anchor=tk.E)
-        self.tree_transfers.column("bytes", width=80, anchor=tk.E)
-        self.tree_transfers.column("status", width=75, anchor=tk.CENTER)
-        self.tree_transfers.column("start", width=130, anchor=tk.CENTER)
-        self.tree_transfers.column("end", width=130, anchor=tk.CENTER)
+        self.tree_transfers.column("id", width=int(50 * self.scale), anchor=tk.CENTER)
+        self.tree_transfers.column("user", width=int(100 * self.scale), anchor=tk.W)
+        self.tree_transfers.column("file", width=int(180 * self.scale), stretch=True, anchor=tk.W)
+        self.tree_transfers.column("dir", width=int(85 * self.scale), anchor=tk.CENTER)
+        self.tree_transfers.column("size", width=int(95 * self.scale), anchor=tk.E)
+        self.tree_transfers.column("bytes", width=int(95 * self.scale), anchor=tk.E)
+        self.tree_transfers.column("status", width=int(85 * self.scale), anchor=tk.CENTER)
+        self.tree_transfers.column("start", width=int(140 * self.scale), anchor=tk.CENTER)
+        self.tree_transfers.column("end", width=int(140 * self.scale), anchor=tk.CENTER)
 
         scrollbar_tr = ttk.Scrollbar(
             bot_group, orient=tk.VERTICAL, command=self.tree_transfers.yview
@@ -900,22 +917,27 @@ class ServerUI:
         h = self.canvas_stats.winfo_height() or 400
 
         # Tiêu đề biểu đồ
+        title_font = ("Segoe UI", max(11, int(12 * self.scale)), "bold")
+        legend_font = ("Segoe UI", max(9, int(9.5 * self.scale)))
+        val_font = ("Segoe UI", max(8, int(8.5 * self.scale)))
+
         self.canvas_stats.create_text(
-            w // 2, 25, text="TỔNG DUNG LƯỢNG TRUYỀN FILE THEO NGƯỜI DÙNG", font=("Segoe UI", 12, "bold"), fill="#2c3e50"
+            w // 2, int(25 * self.scale), text="TỔNG DUNG LƯỢNG TRUYỀN FILE THEO NGƯỜI DÙNG", font=title_font, fill="#2c3e50"
         )
 
         # Chú thích (Legend)
-        self.canvas_stats.create_rectangle(w - 220, 15, w - 200, 30, fill="#2980b9", outline="")
-        self.canvas_stats.create_text(w - 150, 22, text="Upload (MB)", font=("Segoe UI", 9))
-        self.canvas_stats.create_rectangle(w - 110, 15, w - 90, 30, fill="#27ae60", outline="")
-        self.canvas_stats.create_text(w - 50, 22, text="Download (MB)", font=("Segoe UI", 9))
+        lw = int(240 * self.scale)
+        self.canvas_stats.create_rectangle(w - lw, int(15 * self.scale), w - lw + int(20 * self.scale), int(30 * self.scale), fill="#2980b9", outline="")
+        self.canvas_stats.create_text(w - lw + int(60 * self.scale), int(22 * self.scale), text="Upload (MB)", font=legend_font)
+        self.canvas_stats.create_rectangle(w - int(110 * self.scale), int(15 * self.scale), w - int(90 * self.scale), int(30 * self.scale), fill="#27ae60", outline="")
+        self.canvas_stats.create_text(w - int(50 * self.scale), int(22 * self.scale), text="Download (MB)", font=legend_font)
 
         if not stats:
             self.canvas_stats.create_text(
                 w // 2,
                 h // 2,
                 text="Chưa có dữ liệu truyền file nào được ghi nhận.",
-                font=("Segoe UI", 11, "italic"),
+                font=("Segoe UI", max(10, int(11 * self.scale)), "italic"),
                 fill="#7f8c8d",
             )
             return
@@ -927,15 +949,15 @@ class ServerUI:
             down_mb = (row["total_download_bytes"] or 0) / (1024 * 1024)
             max_mb = max(max_mb, up_mb, down_mb)
 
-        margin_left = 80
-        margin_bottom = 60
-        margin_top = 60
+        margin_left = int(80 * self.scale)
+        margin_bottom = int(60 * self.scale)
+        margin_top = int(60 * self.scale)
         chart_h = h - margin_bottom - margin_top
-        chart_w = w - margin_left - 40
+        chart_w = w - margin_left - int(40 * self.scale)
 
         # Trục tọa độ
         self.canvas_stats.create_line(
-            margin_left, h - margin_bottom, w - 40, h - margin_bottom, width=2, fill="#7f8c8d"
+            margin_left, h - margin_bottom, w - int(40 * self.scale), h - margin_bottom, width=2, fill="#7f8c8d"
         )
         self.canvas_stats.create_line(
             margin_left, margin_top, margin_left, h - margin_bottom, width=2, fill="#7f8c8d"
@@ -947,17 +969,17 @@ class ServerUI:
             y = (h - margin_bottom) - (i / 4) * chart_h
             self.canvas_stats.create_line(margin_left - 5, y, margin_left, y, fill="#7f8c8d")
             self.canvas_stats.create_text(
-                margin_left - 10, y, text=f"{val:.1f}", anchor=tk.E, font=("Segoe UI", 8)
+                margin_left - 10, y, text=f"{val:.1f}", anchor=tk.E, font=val_font
             )
             if i > 0:
                 self.canvas_stats.create_line(
-                    margin_left, y, w - 40, y, dash=(2, 4), fill="#ecf0f1"
+                    margin_left, y, w - int(40 * self.scale), y, dash=(2, 4), fill="#ecf0f1"
                 )
 
         # Vẽ từng user
         num_users = len(stats)
         slot_w = chart_w / num_users
-        bar_w = min(35.0, slot_w / 3.0)
+        bar_w = min(int(40.0 * self.scale), slot_w / 3.0)
 
         for i, row in enumerate(stats):
             uname = row["username"]
@@ -975,7 +997,7 @@ class ServerUI:
             self.canvas_stats.create_rectangle(x1, y1, x2, y2, fill="#2980b9", outline="")
             if up_mb > 0:
                 self.canvas_stats.create_text(
-                    (x1 + x2) / 2, y1 - 10, text=f"{up_mb:.1f}", font=("Segoe UI", 8)
+                    (x1 + x2) / 2, y1 - 10, text=f"{up_mb:.1f}", font=val_font
                 )
 
             # Cột Download (Xanh lá)
@@ -987,15 +1009,15 @@ class ServerUI:
             self.canvas_stats.create_rectangle(x3, y3, x4, y4, fill="#27ae60", outline="")
             if down_mb > 0:
                 self.canvas_stats.create_text(
-                    (x3 + x4) / 2, y3 - 10, text=f"{down_mb:.1f}", font=("Segoe UI", 8)
+                    (x3 + x4) / 2, y3 - 10, text=f"{down_mb:.1f}", font=val_font
                 )
 
             # Nhãn tên User phía dưới
             self.canvas_stats.create_text(
                 center_x,
-                h - margin_bottom + 18,
+                h - margin_bottom + int(18 * self.scale),
                 text=uname,
-                font=("Segoe UI", 9, "bold"),
+                font=self.font_bold,
                 fill="#2c3e50",
             )
             # Số lượt
@@ -1003,9 +1025,9 @@ class ServerUI:
             down_cnt = row["download_count"] or 0
             self.canvas_stats.create_text(
                 center_x,
-                h - margin_bottom + 34,
+                h - margin_bottom + int(36 * self.scale),
                 text=f"({up_cnt} up, {down_cnt} down)",
-                font=("Segoe UI", 8),
+                font=val_font,
                 fill="#7f8c8d",
             )
 
