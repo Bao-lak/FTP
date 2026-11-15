@@ -8,12 +8,14 @@ Bao gồm:
 - Kết nối dữ liệu: PORT, PASV
 - Truyền dữ liệu: LIST, NLST, RETR, STOR, APPE, REST, ABOR
 - Bảo mật FTPS: AUTH TLS, PBSZ, PROT
+- Lệnh mở rộng (Custom Extension): XSHA256, XQUOTA, XHISTORY
 """
 
 import os
 import time
 import datetime
 import stat
+import hashlib
 import logging
 from typing import Optional, Callable
 from .session import FTPSession
@@ -53,7 +55,7 @@ class FTPCommandHandler:
             self.running = False
 
     def send_multiline_response(self, code: int, lines: list) -> None:
-        """Gửi phản hồi nhiều dòng theo chuẩn RFC 959 (ví dụ lệnh FEAT)."""
+        """Gửi phản hồi nhiều dòng theo chuẩn RFC 959 (ví dụ lệnh FEAT, XHISTORY)."""
         if not lines:
             self.send_response(code, "OK")
             return
@@ -151,10 +153,8 @@ class FTPCommandHandler:
                 self.send_response(530, "Tai khoan Anonymous khong duoc phep.")
                 self._log_cmd("PASS", "", 530)
                 return
-            # Tìm hoặc gán user anonymous
             user_info = self.session.db.get_user("anonymous")
             if not user_info:
-                # Nếu chưa tạo trong db, dùng thư mục mặc định
                 default_anon_dir = os.path.abspath("./ftp_root/anonymous")
                 os.makedirs(default_anon_dir, exist_ok=True)
                 user_info = {
@@ -226,6 +226,9 @@ class FTPCommandHandler:
             "AUTH TLS",
             "PBSZ",
             "PROT",
+            "XSHA256",
+            "XQUOTA",
+            "XHISTORY",
             "End",
         ]
         self.send_multiline_response(211, features)
@@ -465,7 +468,6 @@ class FTPCommandHandler:
         Ví dụ: 227 Entering Passive Mode (127,0,0,1,195,80) -> Cổng = 195*256 + 80 = 50000.
         """
         try:
-            # Lấy địa chỉ IP server mà client đang kết nối tới
             server_ip = self.session.client_socket.getsockname()[0]
             ip_str, p1, p2 = self.session.data_manager.setup_passive(server_ip)
             ip_parts = ip_str.replace(".", ",")
@@ -497,7 +499,7 @@ class FTPCommandHandler:
             self.send_response(501, f"Loi thong so lenh PORT: {e}")
             self._log_cmd("PORT", arg, 501)
 
-    # ==================== TRUYỀN DỮ LIỆU (LIST, RETR, STOR) ====================
+    # ==================== TRUYỀN DỮ LIỆU (LIST, NLST, RETR, STOR) ====================
 
     def do_LIST(self, arg: str) -> None:
         """
@@ -511,7 +513,6 @@ class FTPCommandHandler:
             return
 
         target_arg = arg.strip()
-        # Loại bỏ các flag phổ biến như -l, -la, -a mà một số client gửi kèm
         if target_arg.startswith("-"):
             tokens = target_arg.split(" ", 1)
             target_arg = tokens[1].strip() if len(tokens) > 1 else ""
@@ -522,7 +523,6 @@ class FTPCommandHandler:
             self._log_cmd("LIST", arg, 550)
             return
 
-        # 1. Thông báo mở kết nối dữ liệu
         self.send_response(150, "Dang mo ket noi du lieu cho danh sach thu muc.")
         self._log_cmd("LIST", arg, 150)
 
@@ -598,14 +598,12 @@ class FTPCommandHandler:
             st = os.stat(full_path)
             is_dir = stat.S_ISDIR(st.st_mode)
             perm_type = "d" if is_dir else "-"
-            # Quyền cơ bản rwxr-xr-x hoặc rw-r--r--
             perms = perm_type + "rwxr-xr-x" if is_dir else perm_type + "rw-r--r--"
             nlinks = 2 if is_dir else 1
             owner = "ftp"
             group = "ftp"
             size = st.st_size
 
-            # Format ngày tháng
             mtime = datetime.datetime.fromtimestamp(st.st_mtime)
             now = datetime.datetime.now()
             month = MONTHS[mtime.month - 1]
@@ -713,6 +711,7 @@ class FTPCommandHandler:
         Hỗ trợ:
         - Kiểm tra quyền WRITE
         - Kiểm tra hạn mức dung lượng (Quota)
+        - Hỗ trợ ghi đè hoặc tiếp tục tải (REST offset)
         - Lưu theo khối buffer 8 KB
         - Ghi log và thống kê vào database
         """
@@ -753,6 +752,7 @@ class FTPCommandHandler:
             self.send_response(425, "Khong the mo ket noi du lieu.")
             return
 
+        # Nếu có offset và file đã tồn tại: mở r+b để ghi tiếp từ vị trí offset (REST Resume cho STOR)
         mode = "ab" if append else ("r+b" if offset > 0 and os.path.exists(real_path) else "wb")
         start_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         start_ts = time.time()
@@ -818,6 +818,85 @@ class FTPCommandHandler:
         self.send_response(226, "Da huy thao tac truyen du lieu.")
         self._log_cmd("ABOR", "", 226)
 
+    # ==================== CÁC LỆNH MỞ RỘNG (EXTENDED COMMANDS: X...) ====================
+
+    def do_XSHA256(self, arg: str) -> None:
+        """
+        Lệnh mở rộng XSHA256 <file>:
+        Tính toán và trả về mã băm SHA-256 của tệp tin trên Server (mã 213 <hash>).
+        Dùng cho phía Client đối chiếu tính toàn vẹn dữ liệu sau khi tải.
+        """
+        if not self._require_auth():
+            return
+        if not self.session.check_permission("READ"):
+            self.send_response(550, "Khong co quyen doc tep de tinh hash SHA-256.")
+            self._log_cmd("XSHA256", arg, 550)
+            return
+        if not arg:
+            self.send_response(501, "Can chi dinh ten tep can tinh SHA-256.")
+            return
+
+        real_path, _ = self.session.resolve_path(arg)
+        if not os.path.exists(real_path) or not os.path.isfile(real_path):
+            self.send_response(550, "Tep khong ton tai hoac la thu muc.")
+            self._log_cmd("XSHA256", arg, 550)
+            return
+
+        try:
+            h = hashlib.sha256()
+            with open(real_path, "rb") as f:
+                while True:
+                    chunk = f.read(65536)  # Đọc 64 KB mỗi khối
+                    if not chunk:
+                        break
+                    h.update(chunk)
+            file_hash = h.hexdigest()
+            self.send_response(213, file_hash)
+            self._log_cmd("XSHA256", arg, 213)
+        except Exception as e:
+            self.send_response(550, f"Loi tinh hash SHA-256: {e}")
+            self._log_cmd("XSHA256", arg, 550)
+
+    def do_XQUOTA(self, arg: str) -> None:
+        """
+        Lệnh mở rộng XQUOTA:
+        Trả về thông tin dung lượng đã dùng và hạn mức Quota của user:
+        Mã phản hồi: 213 <used_bytes> <max_bytes>
+        """
+        if not self._require_auth():
+            return
+
+        used_b, max_b = self.session.db.get_user_quota_info(self.session.username)
+        self.send_response(213, f"{used_b} {max_b}")
+        self._log_cmd("XQUOTA", "", 213)
+
+    def do_XHISTORY(self, arg: str) -> None:
+        """
+        Lệnh mở rộng XHISTORY [limit]:
+        Trả về danh sách các lần truyền file gần nhất của user từ database.
+        Định dạng nhiều dòng:
+        213-History:
+         filename|direction|file_size|bytes_transferred|status|start_time
+         ...
+        213 End
+        """
+        if not self._require_auth():
+            return
+
+        limit = 20
+        if arg and arg.strip().isdigit():
+            limit = min(50, max(1, int(arg.strip())))
+
+        rows = self.session.db.get_user_recent_transfers(self.session.username, limit)
+        lines = ["History:"]
+        for r in rows:
+            lines.append(
+                f"{r['filename']}|{r['direction']}|{r['file_size']}|{r['bytes_transferred']}|{r['status']}|{r['start_time']}"
+            )
+        lines.append("End")
+        self.send_multiline_response(213, lines)
+        self._log_cmd("XHISTORY", str(limit), 213)
+
     # ==================== BẢO MẬT FTPS (TLS / SSL) ====================
 
     def do_AUTH(self, arg: str) -> None:
@@ -834,7 +913,6 @@ class FTPCommandHandler:
             self.send_response(234, "San sang bat dau bat tay TLS (Enabling TLS).")
             self._log_cmd("AUTH", arg, 234)
             try:
-                # Nâng cấp socket điều khiển hiện tại bằng wrap_socket
                 wrapped_sock = self.ssl_context.wrap_socket(
                     self.session.client_socket, server_side=True
                 )
@@ -880,4 +958,3 @@ class FTPCommandHandler:
         else:
             self.send_response(504, f"Che do PROT khong hop le: {level}")
             self._log_cmd("PROT", arg, 504)
-

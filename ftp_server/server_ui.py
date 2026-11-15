@@ -5,8 +5,9 @@ Bao gồm:
 - Tab Quản lý người dùng (CRUD, phân quyền, đổi mật khẩu, quota, speed limit).
 - Tab Đang kết nối (theo dõi client online, ngắt kết nối cưỡng bức).
 - Tab Nhật ký & Lịch sử truyền file (Real-time logs + SQLite transfer records).
-- Tab Thống kê (Biểu đồ dung lượng upload/download thuần Tkinter Canvas).
+- Tab Thống kê (Biểu đồ số lượt truyền 7 ngày gần nhất, Top 5 tệp tải nhiều, Top 5 user truyền nhiều).
 Cập nhật giao diện an toàn đa luồng qua queue.Queue và root.after().
+Tự động tương thích với màn hình độ phân giải cao (HiDPI / 2K / 4K).
 """
 
 import os
@@ -58,25 +59,36 @@ class ServerUI:
         self.root.after(100, self._process_events)
 
     def _setup_styles(self) -> None:
-        """Cấu hình màu sắc và font chữ cho ttk widgets co giãn theo màn hình."""
+        """Cấu hình màu sắc và font chữ cho ttk widgets sắc nét, chuẩn giao diện."""
         self.style = ttk.Style()
         try:
             self.style.theme_use("clam")
         except Exception:
             pass
 
-        self.font_base = ("Segoe UI", max(10, int(10 * self.scale)))
-        self.font_bold = ("Segoe UI", max(10, int(10 * self.scale)), "bold")
-        self.font_header = ("Segoe UI", max(12, int(13 * self.scale)), "bold")
-        self.font_status = ("Segoe UI", max(10, int(10.5 * self.scale)), "bold")
-        self.font_log = ("Consolas", max(9, int(10 * self.scale)))
-        self.row_height = max(26, int(28 * self.scale))
+        import tkinter.font as tkfont
+        available_fonts = tkfont.families()
+        if "Ubuntu Sans" in available_fonts:
+            font_family = "Ubuntu Sans"
+        elif "Ubuntu" in available_fonts:
+            font_family = "Ubuntu"
+        elif "DejaVu Sans" in available_fonts:
+            font_family = "DejaVu Sans"
+        else:
+            font_family = "sans-serif"
+
+        self.font_base = (font_family, 10)
+        self.font_bold = (font_family, 10, "bold")
+        self.font_header = (font_family, 12, "bold")
+        self.font_status = (font_family, 10, "bold")
+        self.font_log = ("DejaVu Sans Mono" if "DejaVu Sans Mono" in available_fonts else "monospace", 9)
+        self.row_height = 28
 
         self.style.configure(".", font=self.font_base)
         self.style.configure("Header.TLabel", font=self.font_header)
         self.style.configure("Status.TLabel", font=self.font_status)
-        self.style.configure("Treeview.Heading", font=self.font_bold)
-        self.style.configure("Treeview", rowheight=self.row_height)
+        self.style.configure("Treeview.Heading", font=self.font_bold, padding=(6, 6))
+        self.style.configure("Treeview", rowheight=self.row_height, font=self.font_base)
 
     def _build_ui(self) -> None:
         """Xây dựng bố cục tổng thể của ứng dụng."""
@@ -128,7 +140,6 @@ class ServerUI:
         container = ttk.Frame(self.tab_control)
         container.pack(fill=tk.BOTH, expand=True)
 
-        # Khung cấu hình mạng
         cfg_frame = ttk.LabelFrame(container, text="Cấu hình Mạng & Giao thức", padding="15")
         cfg_frame.pack(fill=tk.X, pady=10)
 
@@ -230,12 +241,12 @@ class ServerUI:
         quick_stats.pack(fill=tk.BOTH, expand=True, pady=10)
 
         self.lbl_stat_clients = ttk.Label(
-            quick_stats, text="Số client đang online: 0", font=("Segoe UI", 11)
+            quick_stats, text="Số client đang online: 0", font=self.font_base
         )
         self.lbl_stat_clients.pack(anchor=tk.W, pady=5)
 
         self.lbl_stat_uptime = ttk.Label(
-            quick_stats, text="Địa chỉ phục vụ: Chưa khởi động", font=("Segoe UI", 11)
+            quick_stats, text="Địa chỉ phục vụ: Chưa khởi động", font=self.font_base
         )
         self.lbl_stat_uptime.pack(anchor=tk.W, pady=5)
 
@@ -304,7 +315,6 @@ class ServerUI:
 
     def _build_users_tab(self) -> None:
         """Xây dựng Tab quản lý người dùng và phân quyền từ Database."""
-        # Thanh công cụ trên
         toolbar = ttk.Frame(self.tab_users)
         toolbar.pack(fill=tk.X, pady=(0, 10))
 
@@ -324,7 +334,6 @@ class ServerUI:
             side=tk.RIGHT, padx=3
         )
 
-        # Bảng danh sách người dùng
         cols = (
             "id",
             "username",
@@ -401,7 +410,7 @@ class ServerUI:
         """Mở cửa sổ thêm user mới."""
         win = tk.Toplevel(self.root)
         win.title("Thêm Người Dùng Mới")
-        win.geometry("520x420")
+        win.geometry(f"{int(540 * self.scale)}x{int(450 * self.scale)}")
         win.resizable(False, False)
         win.transient(self.root)
         win.grab_set()
@@ -481,7 +490,6 @@ class ServerUI:
                 messagebox.showwarning("Lỗi số liệu", "Quota, Max Conn và Tốc độ phải là số!", parent=win)
                 return
 
-            # Nếu home chỉ trỏ thư mục chung, tự tạo thư mục con theo tên user
             if os.path.basename(home) != uname:
                 home = os.path.join(home, uname)
 
@@ -524,7 +532,7 @@ class ServerUI:
 
         win = tk.Toplevel(self.root)
         win.title(f"Chỉnh Sửa User: {user['username']}")
-        win.geometry("520x400")
+        win.geometry(f"{int(540 * self.scale)}x{int(430 * self.scale)}")
         win.resizable(False, False)
         win.transient(self.root)
         win.grab_set()
@@ -532,7 +540,7 @@ class ServerUI:
         frm = ttk.Frame(win, padding="20")
         frm.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(frm, text=f"Tài khoản: {user['username']}", font=("Segoe UI", 11, "bold")).grid(
+        ttk.Label(frm, text=f"Tài khoản: {user['username']}", font=self.font_header).grid(
             row=0, column=0, columnspan=2, sticky=tk.W, pady=5
         )
 
@@ -631,7 +639,7 @@ class ServerUI:
 
         win = tk.Toplevel(self.root)
         win.title(f"Đổi mật khẩu: {uname}")
-        win.geometry("380x180")
+        win.geometry(f"{int(400 * self.scale)}x{int(200 * self.scale)}")
         win.resizable(False, False)
         win.transient(self.root)
         win.grab_set()
@@ -800,7 +808,6 @@ class ServerUI:
         )
         self.txt_log.pack(fill=tk.BOTH, expand=True)
 
-        # Định nghĩa các tag màu sắc cho log
         self.txt_log.tag_config("INFO", foreground="#3498db")
         self.txt_log.tag_config("SUCCESS", foreground="#2ecc71")
         self.txt_log.tag_config("WARN", foreground="#f39c12")
@@ -887,148 +894,226 @@ class ServerUI:
                 ),
             )
 
-    # ==================== TAB 5: THỐNG KÊ (CANVAS CHART) ====================
+    # ==================== TAB 5: THỐNG KÊ (BIỂU ĐỒ 7 NGÀY & TOP 5) ====================
 
     def _build_stats_tab(self) -> None:
-        """Xây dựng Tab thống kê vẽ biểu đồ trực tiếp trên Tkinter Canvas."""
+        """
+        Xây dựng Tab thống kê quản trị:
+        - Nửa trên: Biểu đồ cột số lượt Upload & Download theo ngày (7 ngày gần nhất) vẽ bằng Canvas.
+        - Nửa dưới: Top 5 tệp được tải nhiều nhất và Top 5 người dùng truyền nhiều nhất.
+        """
         toolbar = ttk.Frame(self.tab_stats)
-        toolbar.pack(fill=tk.X, pady=(0, 10))
+        toolbar.pack(fill=tk.X, pady=(0, 6))
 
-        ttk.Button(toolbar, text="🔄 Cập nhật biểu đồ", command=self.draw_statistics).pack(
+        ttk.Button(toolbar, text="🔄 Cập nhật thống kê", command=self.draw_statistics).pack(
             side=tk.LEFT, padx=5
         )
         ttk.Label(
             toolbar,
-            text="Biểu đồ tổng hợp dung lượng Upload / Download theo User (Đơn vị: MB)",
+            text="Báo cáo số lượt truyền 7 ngày gần nhất và Xếp hạng Top 5 (Tệp & Người dùng)",
             font=("Segoe UI", 10, "italic"),
         ).pack(side=tk.LEFT, padx=15)
 
-        self.canvas_stats = tk.Canvas(self.tab_stats, bg="#ffffff", highlightthickness=1)
+        main_paned = ttk.PanedWindow(self.tab_stats, orient=tk.VERTICAL)
+        main_paned.pack(fill=tk.BOTH, expand=True)
+
+        # 1. Khung biểu đồ 7 ngày
+        chart_frame = ttk.LabelFrame(main_paned, text="Biểu Đồ Số Lượt Truyền 7 Ngày Gần Nhất", padding="5")
+        main_paned.add(chart_frame, weight=3)
+
+        self.canvas_stats = tk.Canvas(chart_frame, bg="#ffffff", highlightthickness=1)
         self.canvas_stats.pack(fill=tk.BOTH, expand=True)
+
+        # 2. Khung Top 5 (chia đôi ngang)
+        tables_frame = ttk.Frame(main_paned)
+        main_paned.add(tables_frame, weight=2)
+
+        tables_paned = ttk.PanedWindow(tables_frame, orient=tk.HORIZONTAL)
+        tables_paned.pack(fill=tk.BOTH, expand=True)
+
+        # Bảng Top 5 tệp tải nhiều nhất
+        f_top_files = ttk.LabelFrame(tables_paned, text="Top 5 Tệp Tải Về Nhiều Nhất", padding="5")
+        tables_paned.add(f_top_files, weight=1)
+
+        cols_f = ("rank", "name", "count", "bytes")
+        self.tree_top_files = ttk.Treeview(f_top_files, columns=cols_f, show="headings", height=5)
+        self.tree_top_files.heading("rank", text="#")
+        self.tree_top_files.heading("name", text="Tên Tệp")
+        self.tree_top_files.heading("count", text="Số Lượt")
+        self.tree_top_files.heading("bytes", text="Tổng Tải")
+
+        self.tree_top_files.column("rank", width=int(35 * self.scale), anchor=tk.CENTER)
+        self.tree_top_files.column("name", width=int(180 * self.scale), stretch=True, anchor=tk.W)
+        self.tree_top_files.column("count", width=int(75 * self.scale), anchor=tk.CENTER)
+        self.tree_top_files.column("bytes", width=int(95 * self.scale), anchor=tk.E)
+        self.tree_top_files.pack(fill=tk.BOTH, expand=True)
+
+        # Bảng Top 5 người dùng truyền nhiều nhất
+        f_top_users = ttk.LabelFrame(tables_paned, text="Top 5 Người Dùng Truyền Nhiều Nhất", padding="5")
+        tables_paned.add(f_top_users, weight=1)
+
+        cols_u = ("rank", "user", "bytes", "count")
+        self.tree_top_users = ttk.Treeview(f_top_users, columns=cols_u, show="headings", height=5)
+        self.tree_top_users.heading("rank", text="#")
+        self.tree_top_users.heading("user", text="Tài Khoản")
+        self.tree_top_users.heading("bytes", text="Tổng Lưu Lượng")
+        self.tree_top_users.heading("count", text="Số Lần")
+
+        self.tree_top_users.column("rank", width=int(35 * self.scale), anchor=tk.CENTER)
+        self.tree_top_users.column("user", width=int(150 * self.scale), stretch=True, anchor=tk.W)
+        self.tree_top_users.column("bytes", width=int(110 * self.scale), anchor=tk.E)
+        self.tree_top_users.column("count", width=int(75 * self.scale), anchor=tk.CENTER)
+        self.tree_top_users.pack(fill=tk.BOTH, expand=True)
 
         self.draw_statistics()
 
+    @staticmethod
+    def _format_bytes(b: int) -> str:
+        """Định dạng byte sang B, KB, MB, GB."""
+        if b < 1024:
+            return f"{b} B"
+        elif b < 1024 * 1024:
+            return f"{b / 1024:.1f} KB"
+        elif b < 1024 * 1024 * 1024:
+            return f"{b / (1024 * 1024):.1f} MB"
+        else:
+            return f"{b / (1024 * 1024 * 1024):.2f} GB"
+
     def draw_statistics(self) -> None:
-        """Vẽ biểu đồ cột thống kê lưu lượng bằng Tkinter Canvas."""
+        """Vẽ biểu đồ cột 7 ngày và nạp dữ liệu vào bảng Top 5."""
         self.canvas_stats.delete("all")
-        stats = self.db.get_transfer_statistics()
 
+        # 1. Nạp bảng Top 5 Tệp
+        for item in self.tree_top_files.get_children():
+            self.tree_top_files.delete(item)
+        top_files = self.db.get_top_5_downloaded_files()
+        for idx, row in enumerate(top_files, 1):
+            self.tree_top_files.insert(
+                "",
+                tk.END,
+                values=(
+                    idx,
+                    row["filename"],
+                    row["download_count"],
+                    self._format_bytes(row["total_bytes"] or 0),
+                ),
+            )
+
+        # 2. Nạp bảng Top 5 Users
+        for item in self.tree_top_users.get_children():
+            self.tree_top_users.delete(item)
+        top_users = self.db.get_top_5_active_users()
+        for idx, row in enumerate(top_users, 1):
+            self.tree_top_users.insert(
+                "",
+                tk.END,
+                values=(
+                    idx,
+                    row["username"],
+                    self._format_bytes(row["total_bytes"] or 0),
+                    row["total_transfers"],
+                ),
+            )
+
+        # 3. Vẽ biểu đồ số lượt truyền 7 ngày gần nhất
+        days_data = self.db.get_transfers_last_7_days()
         w = self.canvas_stats.winfo_width() or 800
-        h = self.canvas_stats.winfo_height() or 400
+        h = self.canvas_stats.winfo_height() or 260
 
-        # Tiêu đề biểu đồ
-        title_font = ("Segoe UI", max(11, int(12 * self.scale)), "bold")
+        title_font = ("Segoe UI", max(10, int(11 * self.scale)), "bold")
         legend_font = ("Segoe UI", max(9, int(9.5 * self.scale)))
         val_font = ("Segoe UI", max(8, int(8.5 * self.scale)))
 
         self.canvas_stats.create_text(
-            w // 2, int(25 * self.scale), text="TỔNG DUNG LƯỢNG TRUYỀN FILE THEO NGƯỜI DÙNG", font=title_font, fill="#2c3e50"
+            w // 2, int(16 * self.scale), text="SỐ LƯỢT UPLOAD & DOWNLOAD THEO NGÀY (7 NGÀY GẦN NHẤT)", font=title_font, fill="#2c3e50"
         )
 
-        # Chú thích (Legend)
-        lw = int(240 * self.scale)
-        self.canvas_stats.create_rectangle(w - lw, int(15 * self.scale), w - lw + int(20 * self.scale), int(30 * self.scale), fill="#2980b9", outline="")
-        self.canvas_stats.create_text(w - lw + int(60 * self.scale), int(22 * self.scale), text="Upload (MB)", font=legend_font)
-        self.canvas_stats.create_rectangle(w - int(110 * self.scale), int(15 * self.scale), w - int(90 * self.scale), int(30 * self.scale), fill="#27ae60", outline="")
-        self.canvas_stats.create_text(w - int(50 * self.scale), int(22 * self.scale), text="Download (MB)", font=legend_font)
+        # Chú thích
+        lw = int(220 * self.scale)
+        self.canvas_stats.create_rectangle(w - lw, int(8 * self.scale), w - lw + int(16 * self.scale), int(22 * self.scale), fill="#2980b9", outline="")
+        self.canvas_stats.create_text(w - lw + int(55 * self.scale), int(15 * self.scale), text="Upload", font=legend_font)
+        self.canvas_stats.create_rectangle(w - int(100 * self.scale), int(8 * self.scale), w - int(84 * self.scale), int(22 * self.scale), fill="#27ae60", outline="")
+        self.canvas_stats.create_text(w - int(45 * self.scale), int(15 * self.scale), text="Download", font=legend_font)
 
-        if not stats:
-            self.canvas_stats.create_text(
-                w // 2,
-                h // 2,
-                text="Chưa có dữ liệu truyền file nào được ghi nhận.",
-                font=("Segoe UI", max(10, int(11 * self.scale)), "italic"),
-                fill="#7f8c8d",
-            )
-            return
+        # Tìm giá trị cao nhất
+        max_val = 1
+        for d in days_data:
+            max_val = max(max_val, d["upload_count"], d["download_count"])
 
-        # Tính toán tỉ lệ vẽ cột
-        max_mb = 1.0  # Tối thiểu 1MB để không chia cho 0
-        for row in stats:
-            up_mb = (row["total_upload_bytes"] or 0) / (1024 * 1024)
-            down_mb = (row["total_download_bytes"] or 0) / (1024 * 1024)
-            max_mb = max(max_mb, up_mb, down_mb)
-
-        margin_left = int(80 * self.scale)
-        margin_bottom = int(60 * self.scale)
-        margin_top = int(60 * self.scale)
+        margin_left = int(60 * self.scale)
+        margin_bottom = int(45 * self.scale)
+        margin_top = int(35 * self.scale)
         chart_h = h - margin_bottom - margin_top
-        chart_w = w - margin_left - int(40 * self.scale)
+        chart_w = w - margin_left - int(30 * self.scale)
+
+        if chart_h <= 10 or chart_w <= 10:
+            return
 
         # Trục tọa độ
         self.canvas_stats.create_line(
-            margin_left, h - margin_bottom, w - int(40 * self.scale), h - margin_bottom, width=2, fill="#7f8c8d"
+            margin_left, h - margin_bottom, w - int(30 * self.scale), h - margin_bottom, width=2, fill="#7f8c8d"
         )
         self.canvas_stats.create_line(
             margin_left, margin_top, margin_left, h - margin_bottom, width=2, fill="#7f8c8d"
         )
 
         # Vạch trục Y
-        for i in range(5):
-            val = (max_mb / 4) * i
-            y = (h - margin_bottom) - (i / 4) * chart_h
-            self.canvas_stats.create_line(margin_left - 5, y, margin_left, y, fill="#7f8c8d")
+        y_steps = 4
+        for i in range(y_steps + 1):
+            val = int(round((max_val / y_steps) * i))
+            y = (h - margin_bottom) - (i / y_steps) * chart_h
+            self.canvas_stats.create_line(margin_left - 4, y, margin_left, y, fill="#7f8c8d")
             self.canvas_stats.create_text(
-                margin_left - 10, y, text=f"{val:.1f}", anchor=tk.E, font=val_font
+                margin_left - 8, y, text=str(val), anchor=tk.E, font=val_font
             )
             if i > 0:
                 self.canvas_stats.create_line(
-                    margin_left, y, w - int(40 * self.scale), y, dash=(2, 4), fill="#ecf0f1"
+                    margin_left, y, w - int(30 * self.scale), y, dash=(2, 4), fill="#ecf0f1"
                 )
 
-        # Vẽ từng user
-        num_users = len(stats)
-        slot_w = chart_w / num_users
-        bar_w = min(int(40.0 * self.scale), slot_w / 3.0)
+        # Vẽ từng ngày
+        num_days = len(days_data)
+        slot_w = chart_w / max(1, num_days)
+        bar_w = min(int(28 * self.scale), slot_w / 3.0)
 
-        for i, row in enumerate(stats):
-            uname = row["username"]
-            up_mb = (row["total_upload_bytes"] or 0) / (1024 * 1024)
-            down_mb = (row["total_download_bytes"] or 0) / (1024 * 1024)
+        for i, d in enumerate(days_data):
+            date_label = d["date"][5:]  # lấy MM-DD
+            up_cnt = d["upload_count"]
+            down_cnt = d["download_count"]
 
             center_x = margin_left + i * slot_w + slot_w / 2
 
             # Cột Upload (Xanh dương)
-            up_bar_h = (up_mb / max_mb) * chart_h
+            up_h = (up_cnt / max_val) * chart_h
             x1 = center_x - bar_w - 2
-            y1 = (h - margin_bottom) - up_bar_h
+            y1 = (h - margin_bottom) - up_h
             x2 = center_x - 2
             y2 = h - margin_bottom
             self.canvas_stats.create_rectangle(x1, y1, x2, y2, fill="#2980b9", outline="")
-            if up_mb > 0:
+            if up_cnt > 0:
                 self.canvas_stats.create_text(
-                    (x1 + x2) / 2, y1 - 10, text=f"{up_mb:.1f}", font=val_font
+                    (x1 + x2) / 2, y1 - 8, text=str(up_cnt), font=val_font
                 )
 
             # Cột Download (Xanh lá)
-            down_bar_h = (down_mb / max_mb) * chart_h
+            down_h = (down_cnt / max_val) * chart_h
             x3 = center_x + 2
-            y3 = (h - margin_bottom) - down_bar_h
+            y3 = (h - margin_bottom) - down_h
             x4 = center_x + bar_w + 2
             y4 = h - margin_bottom
             self.canvas_stats.create_rectangle(x3, y3, x4, y4, fill="#27ae60", outline="")
-            if down_mb > 0:
+            if down_cnt > 0:
                 self.canvas_stats.create_text(
-                    (x3 + x4) / 2, y3 - 10, text=f"{down_mb:.1f}", font=val_font
+                    (x3 + x4) / 2, y3 - 8, text=str(down_cnt), font=val_font
                 )
 
-            # Nhãn tên User phía dưới
+            # Nhãn ngày tháng
             self.canvas_stats.create_text(
                 center_x,
-                h - margin_bottom + int(18 * self.scale),
-                text=uname,
-                font=self.font_bold,
-                fill="#2c3e50",
-            )
-            # Số lượt
-            up_cnt = row["upload_count"] or 0
-            down_cnt = row["download_count"] or 0
-            self.canvas_stats.create_text(
-                center_x,
-                h - margin_bottom + int(36 * self.scale),
-                text=f"({up_cnt} up, {down_cnt} down)",
+                h - margin_bottom + int(14 * self.scale),
+                text=date_label,
                 font=val_font,
-                fill="#7f8c8d",
+                fill="#2c3e50",
             )
 
     # ==================== VÒNG LẶP XỬ LÝ SỰ KIỆN TỪ SERVER (EVENT QUEUE) ====================
@@ -1078,6 +1163,4 @@ class ServerUI:
         except Exception:
             pass
         finally:
-            # Lặp lại sau mỗi 100ms
             self.root.after(100, self._process_events)
-
