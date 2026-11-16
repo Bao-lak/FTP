@@ -1,7 +1,11 @@
 """
 Module Quản lý Cơ sở dữ liệu SQLite cho FTP Server.
-Bao gồm quản lý người dùng, phân quyền, lưu nhật ký lệnh và lịch sử truyền file.
-Tuân thủ thread-safe và sử dụng câu lệnh tham số hóa (?) để chống SQL Injection.
+Bao gồm:
+- Quản lý người dùng, phân quyền (RBAC), hạn mức dung lượng (Quota).
+- Băm mật khẩu an toàn bằng PBKDF2-HMAC-SHA256 kết hợp Salt ngẫu nhiên.
+- Lưu nhật ký phiên đăng nhập (sessions), lệnh FTP (command_logs), lịch sử truyền file (transfers).
+- Cung cấp các hàm truy vấn thống kê nâng cao: số lượt truyền 7 ngày gần nhất, top 5 file, top 5 user.
+- Đảm bảo an toàn đa luồng (thread-safe) với threading.Lock và truy vấn tham số hóa (?).
 """
 
 import os
@@ -9,12 +13,12 @@ import sqlite3
 import hashlib
 import secrets
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 
 
 class DatabaseManager:
-    """Quản lý kết nối và thao tác với SQLite Database."""
+    """Quản lý kết nối và thao tác với SQLite Database phía Server."""
 
     def __init__(self, db_path: str = "ftp_server.db"):
         self.db_path = os.path.abspath(db_path)
@@ -28,7 +32,7 @@ class DatabaseManager:
         return conn
 
     def init_db(self) -> None:
-        """Khởi tạo các bảng cơ sở dữ liệu nếu chưa tồn tại."""
+        """Khởi tạo các bảng cơ sở dữ liệu nếu chưa tồn tại và bổ sung cột mới nếu thiếu."""
         with self._lock:
             conn = self._get_connection()
             try:
@@ -123,7 +127,7 @@ class DatabaseManager:
         except Exception:
             return False
 
-    # ==================== QUẢN LÝ NGƯỜI DÙNG ====================
+    # ==================== QUẢN LÝ NGƯỜI DÙNG & QUOTA ====================
 
     def add_user(
         self,
@@ -328,6 +332,31 @@ class DatabaseManager:
             finally:
                 conn.close()
 
+    def get_user_quota_info(self, username: str) -> Tuple[int, int]:
+        """
+        Lấy thông tin dung lượng đã dùng và hạn mức quota của user.
+        Trả về Tuple: (used_bytes, quota_bytes).
+        used_bytes tính thực tế từ kích thước các tệp trong thư mục home của user.
+        """
+        user = self.get_user(username)
+        if not user:
+            return 0, 0
+
+        quota_bytes = user.get("quota_bytes", 0)
+        home_dir = user.get("home_dir", "")
+        used_bytes = 0
+
+        if home_dir and os.path.exists(home_dir):
+            for dirpath, _, filenames in os.walk(home_dir):
+                for f in filenames:
+                    fp = os.path.join(dirpath, f)
+                    try:
+                        used_bytes += os.path.getsize(fp)
+                    except OSError:
+                        pass
+
+        return used_bytes, quota_bytes
+
     # ==================== PHIÊN & NHẬT KÝ ====================
 
     def log_session_start(self, username: str, ip_address: str) -> int:
@@ -440,6 +469,27 @@ class DatabaseManager:
             finally:
                 conn.close()
 
+    def get_user_recent_transfers(self, username: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Lấy danh sách truyền file gần nhất của riêng một user (dành cho lệnh XHISTORY)."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT id, filename, direction, file_size, bytes_transferred, status, start_time, end_time
+                    FROM transfers
+                    WHERE username = ?
+                    ORDER BY id DESC LIMIT ?
+                    """,
+                    (username, limit),
+                )
+                return [dict(row) for row in cursor.fetchall()]
+            finally:
+                conn.close()
+
+    # ==================== TRUY VẤN THỐNG KÊ NÂNG CAO ====================
+
     def get_transfer_statistics(self) -> List[Dict[str, Any]]:
         """Tổng hợp dung lượng và số lần upload/download theo từng user."""
         with self._lock:
@@ -462,3 +512,89 @@ class DatabaseManager:
             finally:
                 conn.close()
 
+    def get_transfers_last_7_days(self) -> List[Dict[str, Any]]:
+        """
+        Lấy thống kê số lượt upload và download trong 7 ngày gần nhất
+        để vẽ biểu đồ cột theo ngày trên giao diện Server.
+        """
+        # Tạo danh sách 7 ngày gần nhất (từ 6 ngày trước đến hôm nay)
+        today = datetime.now().date()
+        date_list = [(today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
+
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT 
+                        substr(start_time, 1, 10) as trans_date,
+                        SUM(CASE WHEN direction = 'UPLOAD' THEN 1 ELSE 0 END) as upload_count,
+                        SUM(CASE WHEN direction = 'DOWNLOAD' THEN 1 ELSE 0 END) as download_count
+                    FROM transfers
+                    WHERE substr(start_time, 1, 10) >= date('now', '-7 days')
+                    GROUP BY substr(start_time, 1, 10)
+                    """
+                )
+                rows = {r["trans_date"]: dict(r) for r in cursor.fetchall()}
+
+                # Trộn đủ 7 ngày liên tục kể cả ngày có count = 0
+                result = []
+                for d in date_list:
+                    if d in rows:
+                        result.append({
+                            "date": d,
+                            "upload_count": rows[d]["upload_count"] or 0,
+                            "download_count": rows[d]["download_count"] or 0,
+                        })
+                    else:
+                        result.append({"date": d, "upload_count": 0, "download_count": 0})
+                return result
+            finally:
+                conn.close()
+
+    def get_top_5_downloaded_files(self) -> List[Dict[str, Any]]:
+        """Lấy danh sách Top 5 tệp được tải về nhiều nhất."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT 
+                        filename,
+                        COUNT(*) as download_count,
+                        SUM(bytes_transferred) as total_bytes
+                    FROM transfers
+                    WHERE direction = 'DOWNLOAD' AND status = 'SUCCESS'
+                    GROUP BY filename
+                    ORDER BY download_count DESC, total_bytes DESC
+                    LIMIT 5
+                    """
+                )
+                return [dict(row) for row in cursor.fetchall()]
+            finally:
+                conn.close()
+
+    def get_top_5_active_users(self) -> List[Dict[str, Any]]:
+        """Lấy danh sách Top 5 người dùng truyền dữ liệu nhiều nhất (tổng dung lượng)."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT 
+                        username,
+                        COUNT(*) as total_transfers,
+                        SUM(bytes_transferred) as total_bytes
+                    FROM transfers
+                    WHERE status = 'SUCCESS'
+                    GROUP BY username
+                    ORDER BY total_bytes DESC
+                    LIMIT 5
+                    """
+                )
+                return [dict(row) for row in cursor.fetchall()]
+            finally:
+                conn.close()
